@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <modDesc descVersion="101">
 	<author>Mmtrx</author>
-	<version>1.0.0.4</version>
+	<version>1.0.0.7</version>
 	<title>
 		<en>Mow Bale Contracts</en>
 		<de>Mäh- Und Press-Aufträge</de>
@@ -11,6 +11,16 @@
 		<en>
 			<![CDATA[
 Implements combined mowing / baling contracts
+
+Changelog 1.0.0.7
+- expected bale liters now scale with the grass growth stage at contract start
+  (contracts on half-grown grass no longer demand a fully grown yield)
+
+Changelog 1.0.0.6
+- reward = mow + ted + bale (hay) or mow + bale + wrap per bale (silage), read from the game's contract rates
+
+Changelog 1.0.0.5
+- contracts offered on grass at any harvestable growth stage
 
 Changelog 1.0.0.4
 - fix vehicle variant for missions loaded from savegame
@@ -24,6 +34,15 @@ Changelog 1.0.0.3
 			<![CDATA[
 Erzeugt Aufträge zum kombinierten Mähen und Ballenpressen
 
+Changelog 1.0.0.7
+- erwartete Ballenmenge richtet sich nach dem Wachstumsstadium des Grases bei Vertragsbeginn
+
+Changelog 1.0.0.6
+- Lohn = Mähen + Wenden + Pressen (Heu) bzw. Mähen + Pressen + Wickeln je Ballen (Silage)
+
+Changelog 1.0.0.5
+- Verträge auf Gras in jedem erntefähigen Wachstumsstadium
+
 Changelog 1.0.0.3
 - fix #6 Verträge werden nur auf vollständig gewachsenen Grasfeldern erzeugt
 ]]>
@@ -31,6 +50,16 @@ Changelog 1.0.0.3
 		<fr>
 			<![CDATA[
 Génère des tâches pour la fauche et la mise en balles combinées
+
+Changelog 1.0.0.7
+- expected bale liters now scale with the grass growth stage at contract start
+  (contracts on half-grown grass no longer demand a fully grown yield)
+
+Changelog 1.0.0.6
+- reward = mow + ted + bale (hay) or mow + bale + wrap per bale (silage), read from the game's contract rates
+
+Changelog 1.0.0.5
+- contracts offered on grass at any harvestable growth stage
 
 Changelog 1.0.0.3
 - fix #6 generate missions only on fully grown grass

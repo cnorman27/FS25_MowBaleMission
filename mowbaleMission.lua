@@ -9,10 +9,13 @@
 --  v1.0.0.2    23.04.2025  #5 fix save when mission finished (no sellingStation) 
 --  v1.0.0.3    18.05.2025  #6 fix: avail only for fully grown grass 
 --	v1.0.0.4 	27.12.2025  fix vehicle variant for missions loaded from savegame
+--  v1.0.0.5    01.10.2026  avail for all harvestable grass growth states
+--  v1.0.0.6    02.10.2026  reward = mow + ted + bale (hay) / mow + bale + wrap per bale (silage)
+--  v1.0.0.7    10.10.2026  expected liters scaled by the grass growth state at contract start
 --=======================================================================================================
 MowbaleMission = {
 	NAME = "mowbaleMission",
-	REWARD_PER_HA = 3000,
+	REWARD_PER_HA = 6200, 	-- display/fallback only; see getRewardPerHa()
 	REIMBURSEMENT_PER_HA = 2020, 
 	debug = false,
 }
@@ -182,9 +185,77 @@ function MowbaleMission:roundToWholeBales(liters)
 	end
 	return math.max(minBales * baleSizes[minBaleIndex], liters - 10000)
 end
+-- v1.0.0.7: getMaxCutLiters() assumes the grass is at its highest-yield
+-- harvestable state. Since v1.0.0.5 contracts are offered at any harvestable
+-- state, so scale the target by (yield of the current state / yield of the
+-- highest harvestable state).
+MowbaleMission.FALLBACK_SCALES = {0.5, 1.0, 1.4}	-- min harvestable .. max (Alps Multifruit grass)
+local function readStateYieldScales(desc)
+	-- 1) values the engine may already hold
+	for _, key in ipairs({"growthStateYieldScales", "yieldScales", "stateYieldScales"}) do
+		local t = desc[key]
+		if type(t) == "table" and next(t) ~= nil then
+			return t, "fruitType." .. key
+		end
+	end
+	-- 2) read the foliage xml the fruit type was loaded from
+	for _, key in ipairs({"xmlFilename", "filename", "configFilename"}) do
+		local fn = desc[key]
+		if type(fn) == "string" and fn ~= "" and fileExists(fn) then
+			local ok, scales, i = pcall(function()
+				local xml = XMLFile.load("mowbaleFoliage", fn)
+				if xml == nil then return nil, 0 end
+				local s, n = {}, 0
+				for _, k in xml:iterator("foliageType.foliageLayer.foliageState") do
+					n = n + 1
+					s[n] = xml:getFloat(k .. "#yieldScale", 1)
+				end
+				xml:delete()
+				return s, n
+			end)
+			if ok and scales ~= nil and i > 0 then
+				return scales, fn
+			end
+		end
+	end
+	return nil, nil
+end
+function MowbaleMission:getGrowthYieldRatio()
+	if self.field == nil then
+		return 1
+	end
+	local fieldState = self.field:getFieldState()
+	local desc = g_fruitTypeManager:getFruitTypeByIndex(FruitType.GRASS)
+	if fieldState == nil or desc == nil or fieldState.growthState == nil then
+		return 1
+	end
+	local state = fieldState.growthState
+	local minS, maxS = desc.minHarvestingGrowthState, desc.maxHarvestingGrowthState
+	if minS == nil or maxS == nil or state < minS or state > maxS then
+		return 1
+	end
+	local scales, source = readStateYieldScales(desc)
+	local cur, top
+	if scales ~= nil and scales[state] ~= nil and scales[maxS] ~= nil then
+		cur, top = scales[state], scales[maxS]
+	else
+		-- fallback: position between min and max harvestable state
+		local fb = MowbaleMission.FALLBACK_SCALES
+		local n = maxS - minS
+		local function pick(s)
+			if n <= 0 then return 1 end
+			return fb[math.min(#fb, 1 + math.floor((s - minS) * (#fb - 1) / n + 0.5))]
+		end
+		cur, top, source = pick(state), pick(maxS), "fallback"
+	end
+	local ratio = (top ~= nil and top > 0) and math.max(0.05, math.min(1, cur / top)) or 1
+	Logging.info("[MowbaleMission] field %s growth state %d: yield %.2f / %.2f = %.2f of max (%s)",
+		tostring(self.field:getName()), state, cur or 0, top or 0, ratio, tostring(source))
+	return ratio
+end
 function MowbaleMission:finishedPreparing()
 	HarvestMission:superClass().finishedPreparing(self)
-	self.expectedLiters = self:roundToWholeBales(self:getMaxCutLiters())
+	self.expectedLiters = self:roundToWholeBales(self:getMaxCutLiters() * self:getGrowthYieldRatio())
 end
 function MowbaleMission:getPartitionCompletion(index)
 	if self.completionModifier == nil then
@@ -192,8 +263,52 @@ function MowbaleMission:getPartitionCompletion(index)
 	end
 	return HarvestMission:superClass().getPartitionCompletion(self,index)
 end
-function MowbaleMission.getRewardPerHa(_)
-	return g_missionManager:getMissionTypeDataByName(MowbaleMission.NAME).rewardPerHa
+-- v1.0.0.6: pay the sum of the base contracts this job replaces.
+-- Rates are read live from the game's mission types, so BetterContracts /
+-- ContractBoost / map changes to those contracts carry over automatically.
+--   hay:    mowing + tedding + baling          (per ha)
+--   silage: mowing + baling + wrapping per bale (bales converted to per ha)
+MowbaleMission.FALLBACK = {mow = 2500, tedder = 1500, bale = 2200, wrapPerBale = 300, balesPerHa = 15}
+local function getTypeRate(typeName, key, fallback)
+	local data = g_missionManager:getMissionTypeDataByName(typeName)
+	local value = data ~= nil and data[key] or nil
+	if value == nil or value <= 0 then
+		return fallback
+	end
+	return value
+end
+function MowbaleMission:getBalesPerHa()
+	local fallback = MowbaleMission.FALLBACK.balesPerHa
+	local field = self.field
+	if field == nil then
+		return fallback
+	end
+	local ha = (field.getAreaHa ~= nil and field:getAreaHa()) or field.areaHa or field.fieldArea or 0
+	local liters = self.expectedLiters or 0
+	if liters <= 0 and self.getMaxCutLiters ~= nil then
+		-- not prepared yet: estimate from the standing grass
+		local ok, maxLiters = pcall(self.getMaxCutLiters, self)
+		if ok and maxLiters ~= nil then
+			liters = maxLiters * 0.95
+		end
+	end
+	local capacity = 0
+	for _, c in ipairs(g_baleManager:getPossibleCapacitiesForFillType(FillType.SILAGE) or {}) do
+		capacity = math.max(capacity, c)
+	end
+	if ha <= 0 or liters <= 0 or capacity <= 0 then
+		return fallback
+	end
+	return math.floor(liters / capacity) / ha
+end
+function MowbaleMission:getRewardPerHa()
+	local fb = MowbaleMission.FALLBACK
+	local perHa = getTypeRate("mowMission", "rewardPerHa", fb.mow)
+		+ getTypeRate("baleMission", "rewardPerHa", fb.bale)
+	if self == nil or self.fillTypeIndex ~= FillType.SILAGE then
+		return perHa + getTypeRate("tedderMission", "rewardPerHa", fb.tedder)
+	end
+	return perHa + getTypeRate("baleWrapMission", "rewardPerBale", fb.wrapPerBale) * self:getBalesPerHa()
 end
 function MowbaleMission.getMissionTypeName(_)
 	return MowbaleMission.NAME
@@ -251,8 +366,11 @@ function MowbaleMission.isAvailableForField(field, mission)
 			return false
 		end
 		local fruitDesc = g_fruitTypeManager:getFruitTypeByIndex(fruitIndex)
-		-- grass must have the full growth state
-		if fieldState.growthState ~= fruitDesc.maxHarvestingGrowthState then
+		-- grass may be in any harvestable growth state
+		local growthState = fieldState.growthState
+		if fruitDesc == nil or growthState == nil
+			or growthState < fruitDesc.minHarvestingGrowthState
+			or growthState > fruitDesc.maxHarvestingGrowthState then
 			return false
 		end
 	end
