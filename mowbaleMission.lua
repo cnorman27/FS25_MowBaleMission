@@ -12,6 +12,7 @@
 --  v1.0.0.5    01.10.2026  avail for all harvestable grass growth states
 --  v1.0.0.6    02.10.2026  reward = mow + ted + bale (hay) / mow + bale + wrap per bale (silage)
 --  v1.0.0.7    10.10.2026  expected liters scaled by the grass growth state at contract start
+--  v1.0.0.8    11.10.2026  expected liters = constant share of max cut (replaces 1.0.0.7 scaling)
 --=======================================================================================================
 MowbaleMission = {
 	NAME = "mowbaleMission",
@@ -185,77 +186,19 @@ function MowbaleMission:roundToWholeBales(liters)
 	end
 	return math.max(minBales * baleSizes[minBaleIndex], liters - 10000)
 end
--- v1.0.0.7: getMaxCutLiters() assumes the grass is at its highest-yield
--- harvestable state. Since v1.0.0.5 contracts are offered at any harvestable
--- state, so scale the target by (yield of the current state / yield of the
--- highest harvestable state).
-MowbaleMission.FALLBACK_SCALES = {0.5, 1.0, 1.4}	-- min harvestable .. max (Alps Multifruit grass)
-local function readStateYieldScales(desc)
-	-- 1) values the engine may already hold
-	for _, key in ipairs({"growthStateYieldScales", "yieldScales", "stateYieldScales"}) do
-		local t = desc[key]
-		if type(t) == "table" and next(t) ~= nil then
-			return t, "fruitType." .. key
-		end
-	end
-	-- 2) read the foliage xml the fruit type was loaded from
-	for _, key in ipairs({"xmlFilename", "filename", "configFilename"}) do
-		local fn = desc[key]
-		if type(fn) == "string" and fn ~= "" and fileExists(fn) then
-			local ok, scales, i = pcall(function()
-				local xml = XMLFile.load("mowbaleFoliage", fn)
-				if xml == nil then return nil, 0 end
-				local s, n = {}, 0
-				for _, k in xml:iterator("foliageType.foliageLayer.foliageState") do
-					n = n + 1
-					s[n] = xml:getFloat(k .. "#yieldScale", 1)
-				end
-				xml:delete()
-				return s, n
-			end)
-			if ok and scales ~= nil and i > 0 then
-				return scales, fn
-			end
-		end
-	end
-	return nil, nil
-end
-function MowbaleMission:getGrowthYieldRatio()
-	if self.field == nil then
-		return 1
-	end
-	local fieldState = self.field:getFieldState()
-	local desc = g_fruitTypeManager:getFruitTypeByIndex(FruitType.GRASS)
-	if fieldState == nil or desc == nil or fieldState.growthState == nil then
-		return 1
-	end
-	local state = fieldState.growthState
-	local minS, maxS = desc.minHarvestingGrowthState, desc.maxHarvestingGrowthState
-	if minS == nil or maxS == nil or state < minS or state > maxS then
-		return 1
-	end
-	local scales, source = readStateYieldScales(desc)
-	local cur, top
-	if scales ~= nil and scales[state] ~= nil and scales[maxS] ~= nil then
-		cur, top = scales[state], scales[maxS]
-	else
-		-- fallback: position between min and max harvestable state
-		local fb = MowbaleMission.FALLBACK_SCALES
-		local n = maxS - minS
-		local function pick(s)
-			if n <= 0 then return 1 end
-			return fb[math.min(#fb, 1 + math.floor((s - minS) * (#fb - 1) / n + 0.5))]
-		end
-		cur, top, source = pick(state), pick(maxS), "fallback"
-	end
-	local ratio = (top ~= nil and top > 0) and math.max(0.05, math.min(1, cur / top)) or 1
-	Logging.info("[MowbaleMission] field %s growth state %d: yield %.2f / %.2f = %.2f of max (%s)",
-		tostring(self.field:getName()), state, cur or 0, top or 0, ratio, tostring(source))
-	return ratio
-end
+-- v1.0.0.8: getMaxCutLiters() is the field's theoretical max-yield cut.
+-- Real output is well below that (measured: 1.68 ha field at growth stage 3/5
+-- cut 67,200 l = 64% of max; another full field delivered 39% of max), and the
+-- per-state yield scales did not predict it. Use one constant share of max
+-- instead, so a fully delivered field always completes at any growth stage.
+MowbaleMission.TARGET_FACTOR = 0.35	-- share of getMaxCutLiters() to deliver
 function MowbaleMission:finishedPreparing()
 	HarvestMission:superClass().finishedPreparing(self)
-	self.expectedLiters = self:roundToWholeBales(self:getMaxCutLiters() * self:getGrowthYieldRatio())
+	local maxLiters = self:getMaxCutLiters()
+	self.expectedLiters = self:roundToWholeBales(maxLiters * MowbaleMission.TARGET_FACTOR)
+	Logging.info("[MowbaleMission] field %s: max cut %.0f l x %.2f -> expected %.0f l",
+		tostring(self.field ~= nil and self.field:getName() or "?"), maxLiters,
+		MowbaleMission.TARGET_FACTOR, self.expectedLiters)
 end
 function MowbaleMission:getPartitionCompletion(index)
 	if self.completionModifier == nil then

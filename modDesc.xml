@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <modDesc descVersion="101">
 	<author>Mmtrx</author>
-	<version>1.0.0.7</version>
+	<version>1.0.0.8</version>
 	<title>
 		<en>Mow Bale Contracts</en>
 		<de>Mäh- Und Press-Aufträge</de>
@@ -11,6 +11,10 @@
 		<en>
 			<![CDATA[
 Implements combined mowing / baling contracts
+
+Changelog 1.0.0.8
+- expected bale liters = 35% of the field's max-yield cut at any growth stage
+  (replaces the 1.0.0.7 growth-stage scaling, which set targets far below real output)
 
 Changelog 1.0.0.7
 - expected bale liters now scale with the grass growth stage at contract start
@@ -34,6 +38,10 @@ Changelog 1.0.0.3
 			<![CDATA[
 Erzeugt Aufträge zum kombinierten Mähen und Ballenpressen
 
+Changelog 1.0.0.8
+- erwartete Ballenmenge = 35% der maximalen Schnittmenge des Feldes, in jedem Wachstumsstadium
+  (ersetzt die Skalierung aus 1.0.0.7)
+
 Changelog 1.0.0.7
 - erwartete Ballenmenge richtet sich nach dem Wachstumsstadium des Grases bei Vertragsbeginn
 
@@ -50,6 +58,10 @@ Changelog 1.0.0.3
 		<fr>
 			<![CDATA[
 Génère des tâches pour la fauche et la mise en balles combinées
+
+Changelog 1.0.0.8
+- expected bale liters = 35% of the field's max-yield cut at any growth stage
+  (replaces the 1.0.0.7 growth-stage scaling, which set targets far below real output)
 
 Changelog 1.0.0.7
 - expected bale liters now scale with the grass growth stage at contract start
